@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>블록 분리 기반 전처리를 통한 Tesseract OCR의 컬러 시간표 인식 성능 향상</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Malgun Gothic', '맑은 고딕', 'Noto Sans KR', sans-serif;
+    background: #ffffff;
+    color: #1a2330;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  .slideshow {
+    width: 100%;
+    height: 100vh;
+    position: relative;
+  }
+
+  .slide {
+    display: none;
+    position: absolute;
+    inset: 0;
+    padding: 48px 64px;
+    flex-direction: column;
+    justify-content: center;
+    animation: fadeIn 0.4s ease;
+  }
+
+  .slide.active { display: flex; }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ─── Title slide ─── */
+  .slide-title {
+    background: linear-gradient(135deg, #f0f6ff 0%, #e8f2ff 50%, #f0f6ff 100%);
+    align-items: center;
+    text-align: center;
+  }
+
+  .slide-title .conference-tag {
+    font-size: 14px;
+    color: #0066cc;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 32px;
+    border: 1px solid #0066cc44;
+    padding: 6px 20px;
+    border-radius: 20px;
+  }
+
+  .slide-title h1 {
+    font-size: 36px;
+    font-weight: 700;
+    color: #0d1b2a;
+    line-height: 1.4;
+    max-width: 900px;
+    margin-bottom: 16px;
+  }
+
+  .slide-title h2 {
+    font-size: 20px;
+    font-weight: 400;
+    color: #3a5a7a;
+    margin-bottom: 48px;
+    max-width: 860px;
+  }
+
+  .author-box {
+    display: flex;
+    gap: 32px;
+    margin-bottom: 32px;
+  }
+
+  .author-card {
+    background: #ffffff;
+    border: 1px solid #0066cc33;
+    border-radius: 12px;
+    padding: 16px 28px;
+    text-align: center;
+    box-shadow: 0 2px 8px #0066cc11;
+  }
+
+  .author-card .name { font-size: 18px; font-weight: 600; color: #1a2330; }
+  .author-card .affil { font-size: 13px; color: #3a5a7a; margin-top: 4px; }
+
+  .keywords {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    max-width: 800px;
+  }
+
+  .kw {
+    background: #0066cc1a;
+    border: 1px solid #0066cc55;
+    border-radius: 6px;
+    padding: 4px 14px;
+    font-size: 13px;
+    color: #0066cc;
+  }
+
+  /* ─── Section slides ─── */
+  .slide-section {
+    background: linear-gradient(135deg, #f8fbff 0%, #f0f6ff 100%);
+  }
+
+  .section-num {
+    font-size: 13px;
+    color: #0066cc;
+    letter-spacing: 2px;
+    margin-bottom: 8px;
+  }
+
+  .slide h3 {
+    font-size: 32px;
+    font-weight: 700;
+    color: #0d1b2a;
+    margin-bottom: 36px;
+    padding-bottom: 14px;
+    border-bottom: 2px solid #0066cc44;
+  }
+
+  .slide h3 .accent { color: #0066cc; }
+
+  /* Cards & grids */
+  .card-grid {
+    display: grid;
+    gap: 20px;
+  }
+
+  .card-grid.cols-2 { grid-template-columns: 1fr 1fr; }
+  .card-grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+
+  .card {
+    background: #ffffff;
+    border: 1px solid #d0dce8;
+    border-radius: 12px;
+    padding: 22px 26px;
+    box-shadow: 0 1px 4px #00000010;
+  }
+
+  .card.accent-blue  { border-color: #0066cc44; background: #f0f6ff; }
+  .card.accent-green { border-color: #2e7d3244; background: #f0faf1; }
+  .card.accent-red   { border-color: #c6282844; background: #fff5f5; }
+  .card.accent-amber { border-color: #e65c0044; background: #fff8f0; }
+
+  .card-icon { font-size: 28px; margin-bottom: 10px; }
+  .card-title { font-size: 16px; font-weight: 600; color: #1a2330; margin-bottom: 8px; }
+  .card p { font-size: 14px; color: #3a5a7a; line-height: 1.7; }
+
+  /* Pipeline steps */
+  .pipeline {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .pipe-step {
+    flex: 1;
+    background: #ffffff;
+    border: 1px solid #0066cc33;
+    border-radius: 10px;
+    padding: 18px 14px;
+    text-align: center;
+    box-shadow: 0 1px 4px #0066cc0f;
+  }
+
+  .pipe-step .step-num {
+    font-size: 11px;
+    color: #0066cc;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+  }
+
+  .pipe-step .step-title { font-size: 15px; font-weight: 600; color: #0d1b2a; margin-bottom: 6px; }
+  .pipe-step .step-desc  { font-size: 13px; color: #3a5a7a; line-height: 1.5; }
+
+  .pipe-arrow { font-size: 24px; color: #0066cc66; flex-shrink: 0; }
+
+  /* Table */
+  .result-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 8px;
+  }
+
+  .result-table th {
+    background: #e8f2ff;
+    color: #0066cc;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 12px 16px;
+    text-align: center;
+    border: 1px solid #0066cc33;
+  }
+
+  .result-table td {
+    padding: 11px 16px;
+    text-align: center;
+    border: 1px solid #d0dce8;
+    font-size: 14px;
+    color: #1a2330;
+  }
+
+  .result-table tr:hover td { background: #f0f6ff; }
+
+  .result-table tr.best td {
+    background: #ddeeff;
+    color: #0d1b2a;
+    font-weight: 600;
+  }
+
+  .result-table tr.second td { background: #f0faf1; }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .badge-blue  { background: #e0f0ff; color: #0066cc; border: 1px solid #0066cc44; }
+  .badge-green { background: #e8f5e9; color: #2e7d32; border: 1px solid #2e7d3244; }
+  .badge-red   { background: #ffebee; color: #c62828; border: 1px solid #c6282844; }
+
+  /* Formula box */
+  .formula-box {
+    background: #f0f6ff;
+    border: 1px solid #0066cc33;
+    border-radius: 10px;
+    padding: 14px 20px;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    color: #0044aa;
+    margin: 8px 0;
+    letter-spacing: 0.5px;
+  }
+
+  /* Highlight text */
+  .hl { color: #0066cc; font-weight: 600; }
+  .hl-g { color: #2e7d32; font-weight: 600; }
+  .hl-r { color: #c62828; font-weight: 600; }
+  .hl-a { color: #e65c00; font-weight: 600; }
+
+  /* Bullet list */
+  .bullet-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .bullet-list li {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    font-size: 15px;
+    color: #2a3f55;
+    line-height: 1.6;
+  }
+
+  .bullet-list li::before {
+    content: '▸';
+    color: #0066cc;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  /* Progress bar */
+  .progress-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #4db8ff, #0080ff);
+    transition: width 0.3s ease;
+    z-index: 100;
+  }
+
+  /* Nav */
+  .nav {
+    position: fixed;
+    bottom: 20px;
+    right: 28px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    z-index: 100;
+  }
+
+  .nav-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 1px solid #0066cc55;
+    background: #ffffffcc;
+    color: #0066cc;
+    font-size: 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(8px);
+    transition: background 0.2s;
+    box-shadow: 0 1px 4px #00000018;
+  }
+
+  .nav-btn:hover { background: #e0f0ff; }
+
+  .slide-counter {
+    font-size: 13px;
+    color: #3a5a7a;
+    min-width: 48px;
+    text-align: center;
+  }
+
+  /* Slide map dots */
+  .slide-dots {
+    position: fixed;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 8px;
+    z-index: 100;
+  }
+
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #0066cc33;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.2s;
+  }
+
+  .dot.active { background: #0066cc; transform: scale(1.3); }
+
+  /* Two-col layout */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    align-items: start;
+  }
+
+  /* Summary box */
+  .summary-box {
+    background: linear-gradient(135deg, #e8f4ff, #f0f8ff);
+    border: 1px solid #0066cc44;
+    border-radius: 14px;
+    padding: 24px 28px;
+    margin-top: 24px;
+  }
+
+  .summary-box .label {
+    font-size: 12px;
+    color: #0066cc;
+    letter-spacing: 2px;
+    margin-bottom: 10px;
+  }
+
+  .summary-box p { font-size: 15px; color: #1a2330; line-height: 1.75; }
+
+  /* Tag */
+  .tag {
+    display: inline-block;
+    background: #e0f0ff;
+    border: 1px solid #0066cc33;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 12px;
+    color: #0066cc;
+    margin-right: 4px;
+  }
+
+  /* Chart bars */
+  .bar-chart { margin-top: 16px; }
+  .bar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .bar-label { font-size: 13px; color: #3a5a7a; width: 140px; text-align: right; flex-shrink: 0; }
+  .bar-track { flex: 1; height: 28px; background: #e8f0f8; border-radius: 6px; overflow: hidden; position: relative; }
+  .bar-fill { height: 100%; border-radius: 6px; display: flex; align-items: center; padding-left: 10px; font-size: 13px; font-weight: 600; color: #fff; transition: width 0.8s ease; }
+  .bar-value { font-size: 13px; color: #3a5a7a; width: 60px; flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<div class="slideshow" id="slideshow">
+
+  <!-- ───── SLIDE 1: TITLE ───── -->
+  <div class="slide slide-title active">
+    <div class="conference-tag">2026 한국정보기술학회 하계 종합학술대회</div>
+    <h1>블록 분리 기반 전처리를 통한<br>Tesseract OCR의 컬러 시간표 인식 성능 향상</h1>
+    <h2>Performance Improvement of Tesseract OCR for Color Timetable Recognition<br>Using Block Segmentation-Based Preprocessing</h2>
+    <div class="author-box">
+      <div class="author-card">
+        <div class="name">정준형</div>
+        <div class="affil">계명대학교 컴퓨터공학과</div>
+        <div class="affil" style="color:#4db8ff;font-size:12px;">joon3701@gmail.com</div>
+      </div>
+    </div>
+    <div class="keywords">
+      <span class="kw">OCR</span>
+      <span class="kw">Tesseract</span>
+      <span class="kw">컬러 시간표</span>
+      <span class="kw">BFS 세그멘테이션</span>
+      <span class="kw">배경색 감지</span>
+      <span class="kw">이진화</span>
+      <span class="kw">한국어 텍스트 인식</span>
+    </div>
+  </div>
+
+  <!-- ───── SLIDE 2: 목차 ───── -->
+  <div class="slide slide-section">
+    <div class="section-num">TABLE OF CONTENTS</div>
+    <h3>발표 <span class="accent">순서</span></h3>
+    <div class="card-grid cols-2" style="gap:16px;">
+      <div class="card accent-blue" style="display:flex;align-items:center;gap:16px;">
+        <div style="font-size:32px;color:#4db8ff;font-weight:700;">01</div>
+        <div>
+          <div class="card-title">서론</div>
+          <p>OCR 기술 개요 및 Tesseract의 한계</p>
+        </div>
+      </div>
+      <div class="card" style="display:flex;align-items:center;gap:16px;">
+        <div style="font-size:32px;color:#8ab4d4;font-weight:700;">02</div>
+        <div>
+          <div class="card-title">제안 방법</div>
+          <p>BFS 블록 분리 및 배경색 기반 전처리</p>
+        </div>
+      </div>
+      <div class="card" style="display:flex;align-items:center;gap:16px;">
+        <div style="font-size:32px;color:#8ab4d4;font-weight:700;">03</div>
+        <div>
+          <div class="card-title">실험 및 결과</div>
+          <p>4가지 방법 비교 및 성능 분석</p>
+        </div>
+      </div>
+      <div class="card" style="display:flex;align-items:center;gap:16px;">
+        <div style="font-size:32px;color:#8ab4d4;font-weight:700;">04</div>
+        <div>
+          <div class="card-title">결론</div>
+          <p>핵심 기여 및 향후 연구 방향</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ───── SLIDE 3: 서론 - 연구 배경 ───── -->
+  <div class="slide slide-section">
+    <div class="section-num">01 — 서론</div>
+    <h3>연구 <span class="accent">배경</span></h3>
+    <div class="card-grid cols-2">
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div class="card accent-blue">
+          <div class="card-icon">🔤</div>
+          <div class="card-title">OCR이란?</div>
+          <p>Optical Character Recognition — 이미지에서 텍스트를 추출하는 기술. 문서 디지털화, 자동화 데이터 입력 등 다양한 분야에서 활발히 연구됨.</p>
+        </div>
+        <div class="card accent-green">
+          <div class="card-icon">⚙️</div>
+          <div class="card-title">Tesseract OCR</div>
+          <p>대표적인 <span class="hl">오픈소스 OCR 엔진</span>. 이진화 → 레이아웃 분석 → 문자 인식을 단일 파이프라인으로 처리하며, 일반 문서 환경에서 <span class="hl-g">높은 인식률</span> 보유.</p>
+        </div>
+      </div>
+      <div class="card accent-red" style="display:flex;flex-direction:column;justify-content:center;">
+        <div class="card-icon">⚠️</div>
+        <div class="card-title">문제점: 컬러 시간표에서의 성능 저하</div>
+        <ul class="bullet-list" style="margin-top:10px;">
+          <li>과목별로 서로 다른 <span class="hl-r">배경색</span>이 혼재</li>
+          <li>전체 이미지 단일 이진화 시 <span class="hl-r">배경색 간섭</span> 발생</li>
+          <li>텍스트 영역 검출 및 문자 인식 <span class="hl-r">성능 저하</span></li>
+          <li>인접 블록 간 텍스트 혼재 & 배경색 오인식</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ───── SLIDE 4: 기존 파이프라인의 문제 ───── -->
+  <div class="slide slide-section">
+    <div class="section-num">01 — 서론</div>
+    <h3>기존 Tesseract의 <span class="accent">단일 파이프라인</span> 문제</h3>
+    <div class="pipeline" style="margin-bottom:28px;">
+      <div class="pipe-step" style="border-color:#ef535044;background:#ef53500a;">
+        <div class="step-num">INPUT</div>
+        <div class="step-title">컬러 시간표</div>
+        <div class="step-desc">다양한 배경색<br>혼재 이미지</div>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step" style="border-color:#ef535044;background:#ef53500a;">
+        <div class="step-num">STEP 1</div>
+        <div class="step-title">Otsu 이진화</div>
+        <div class="step-desc">전체 이미지<br>단일 임계값 적용</div>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step" style="border-color:#ef535044;background:#ef53500a;">
+        <div class="step-num">STEP 2</div>
+        <div class="step-title">레이아웃 분석</div>
+        <div class="step-desc">Connected Component<br>텍스트 영역 탐지</div>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step" style="border-color:#ef535044;background:#ef53500a;">
+        <div class="step-num">OUTPUT</div>
+        <div class="step-title">LSTM 인식</div>
+        <div class="step-desc">문자 인식<br>(성능 저하)</div>
+      </div>
+    </div>
+    <div class="card-grid cols-3">
+      <div class="card accent-red">
+        <div class="card-title">🚫 배경색 노이즈</div>
+        <p>단일 임계값 이진화 과정에서 다양한 배경색이 노이즈로 작용</p>
+      </div>
+      <div class="card accent-red">
+        <div class="card-title">🚫 텍스트 혼재</div>
+        <p>인접 블록 간 텍스트가 서로 혼재되어 검출 오류 발생</p>
+      </div>
+      <div class="card accent-red">
+        <div class="card-title">🚫 오인식</div>
+        <p>배경색이 문자로 오인식되어 전체 인식 정확도 급감</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ───── SLIDE 5: 제안 방법 개요 ───── -->
+  <div class="slide slide-section">
+    <div class="section-num">02 — 제안 방법</div>
+    <h3>제안 방법 <span class="accent">개요</span></h3>
+    <p style="font-size:15px;color:#8ab4d4;margin-bottom:24px;">Tesseract의 레이아웃 분석과 이진화를 외부 전처리 단계로 분리하여 배경색 간섭을 원천 차단</p>
+    <div class="pipeline">
+      <div class="pipe-step" style="background:#1a2d40;">
+        <div class="step-num">INPUT</div>
+        <div class="step-title">컬러 시간표</div>
+        <div class="step-desc">다양한 배경색<br>이미지</div>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step" style="border-color:#4db8ff55;background:#4db8ff0d;">
+        <div class="step-num" style="color:#4db8ff;">STEP 1</div>
+        <div class="step-title">BFS 블록 분리</div>
+        <div class="step-desc">유채색 픽셀 기반<br>과목 블록 추출</div>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step" style="border-color:#4db8ff55;background:#4db8ff0d;">
+        <div class="step-num" style="color:#4db8ff;">STEP 2</div>
+        <div class="step-title">배경색 이진화</div>
+        <div class="step-desc">32단위 양자화<br>히스토그램 분석</div>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step" style="border-color:#4caf5055;background:#4caf500d;">
+        <div class="step-num" style="color:#4caf50;">STEP 3</div>
+        <div class="step-title">Tesseract 인식</div>
+        <div class="step-desc">문자 인식만<br>수행 (LSTM)</div>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step" style="border-color:#4caf5055;background:#4caf500d;">
+        <div class="step-num" style="color:#4caf50;">OUTPUT</div>
+        <div class="step-title">인식 결과</div>
+        <div class="step-desc">향상된 정확도의<br>텍스트 출력</div>
+      </div>
+    </div>
+    <div class="summary-box">
+      <div class="label">CORE IDEA</div>
+      <p>기존 방법에서 Tesseract가 담당하던 <span class="hl">레이아웃 분석과 이진화를 외부 전처리</span>로 분리함으로써, Tesseract는 순수하게 <span class="hl-g">문자 인식에만 집중</span>할 수 있도록 역할을 재분배</p>
+    </div>
+  </div>
+
+  <!-- ───── SLIDE 6: STEP 1 - BFS 블록 분리 ───── -->
+  <div class="slide slide-section">
+    <div class="section-num">02 — 제안 방법 / STEP 1</div>
+    <h3>BFS 기반 <span class="accent">블록 분리</span></h3>
+    <div class="two-col">
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div class="card accent-blue">
+          <div class="card-title">유채색 픽셀 판별</div>
+          <p>입력 이미지의 각 픽셀에 대해 <span class="hl">밝기(Brightness)와 채도(Saturation)</span>를 기준으로 유채색 픽셀을 판별</p>
+        </div>
+        <div class="card accent-blue">
+          <div class="card-title">BFS 탐색</div>
+          <p>너비 우선 탐색(Breadth-First Search) 알고리즘으로 <span class="hl">인접한 유채색 픽셀</span>을 하나의 과목 블록으로 묶음</p>
+        </div>
+        <div class="card accent-green">
+          <div class="card-title">효과</div>
+          <p>블록 단위 분리로 <span class="hl-g">인접 블록 간 간섭 완전 제거</span><br>각 과목 블록이 독립적으로 처리됨</p>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div style="background:#0a1520;border:1px solid #4db8ff33;border-radius:12px;padding:22px;font-size:14px;color:#8ab4d4;line-height:2;">
+          <div style="color:#4db8ff;font-size:12px;letter-spacing:2px;margin-bottom:12px;">BFS ALGORITHM</div>
+          <div style="color:#cdd9e5;">시작 픽셀 (유채색) 선택</div>
+          <div style="padding-left:16px;color:#7dd3fc;">↓ 큐에 추가</div>
+          <div style="padding-left:16px;color:#cdd9e5;">상하좌우 인접 픽셀 검사</div>
+          <div style="padding-left:32px;color:#7dd3fc;">↓ 유채색이면 같은 블록</div>
+          <div style="padding-left:32px;color:#cdd9e5;">방문하지 않은 픽셀 큐에 추가</div>
+          <div style="padding-left:16px;color:#7dd3fc;">↓ 큐가 빌 때까지 반복</div>
+          <div style="padding-left:16px;color:#4caf50;font-weight:600;">하나의 과목 블록 완성 ✓</div>
+        </div>
+        <div class="card">
+          <div class="card-title">📌 블록 분리 후 처리</div>
+          <p style="font-size:13px;">분리된 각 블록은 <span class="hl">독립적으로 이진화</span>가 적용되어, 각 블록 고유의 배경색에 최적화된 처리가 가능</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ───── SLIDE 7: Bicubic 방법 ───── -->
+  <div class="slide slide-section">
+    <div class="section-num">02 — 비교 방법 / Bicubic</div>
+    <h3>Bicubic <span class="accent">업스케일</span> 방법</h3>
+    <p style="font-size:14px;color:#8ab4d4;margin-bottom:20px;">BFS 블록 분리 후 Bicubic 보간법으로 2배 업스케일 → 이진화 없이 컬러 이미지를 Tesseract에 전달</p>
+    <div class="two-col" style="align-items:start;">
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div class="card accent-blue">
+          <div class="card-title">① BFS 블록 분리</div>
+          <p>유채색 픽셀 기반 BFS 탐색으로 과목 블록을 개별 분리 → <span class="hl">인접 블록 간 간섭 제거</span></p>
+        </div>
+        <div class="card accent-blue">
+          <div class="card-title">② Bicubic 보간법으로 2배 업스케일</div>
+          <p>주변 <span class="hl">4×4 픽셀</span>을 사용하는 3차 다항식 기반 보간으로 각 블록을 2배 확대</p>
+        </div>
+        <div class="formula-box" style="font-size:12px;line-height:1.9;">
+          W(t) = (a+2)|t|³-(a+3)|t|²+1 &nbsp;(|t|≤1)<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;a|t|³-5a|t|²+8a|t|-4a &nbsp;(1&lt;|t|&lt;2)<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;0 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(otherwise)
+        </div>
+        <div class="formula-box" style="font-size:12px;">
+          p(x,y) = Σ Σ I(m,n) · W(x-m) · W(y-n)
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div class="card accent-green">
+          <div class="card-title">③ Tesseract 전달</div>
+          <p>이진화 없이 <span class="hl-g">컬러 이미지 그대로</span> Tesseract에 전달 → Tesseract 내부에서 Otsu 이진화 수행</p>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <div class="pipe-step" style="border-color:#4db8ff44;background:#4db8ff0d;">
+            <div class="step-num" style="color:#4db8ff;">STEP 1</div>
+            <div class="step-title" style="font-size:13px;">BFS 블록 분리</div>
+          </div>
+          <div style="text-align:center;color:#0066cc66;font-size:20px;">↓</div>
+          <div class="pipe-step" style="border-color:#ffa72644;background:#ffa7260d;">
+            <div class="step-num" style="color:#ffa726;">STEP 2</div>
+            <div class="step-title" style="font-size:13px;">Bicubic 2배 업스케일</div>
+          </div>
+          <div style="text-align:center;color:#0066cc66;font-size:20px;">↓</div>
+          <div class="pipe-step" style="border-color:#ef535044;background:#ef53500d;">
+            <div class="step-num" style="color:#ef5350;">STEP 3</div>
+            <div class="step-title" style="font-size:13px;">Tesseract 내부 이진화 + 인식</div>
+          </div>
+        </div>
+        <div class="card accent-red">
+          <div class="card-title">⚠ 한계</div>
+          <p style="font-size:13px;">이진화를 외부에서 처리하지 않으므로 Tesseract 내부 Otsu 이진화 시 <span class="hl-r">배경색 간섭이 잔존</span></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ───── SLIDE 8: Block Background 방법 ───── -->
+  <div class="slide slide-section">
+    <div class="section-num">02 — 제안 방법 / Block Background</div>
+    <h3>Block Background <span class="accent">방법</span></h3>
+    <p style="font-size:14px;color:#8ab4d4;margin-bottom:20px;">BFS 블록 분리 후 각 블록의 배경색을 감지하여 이진화 — Tesseract에 문자 인식만 수행</p>
+    <div class="two-col" style="align-items:start;">
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div class="card accent-blue">
+          <div class="card-title">① 배경색 결정 (C_dom)</div>
+          <p>32단위 양자화된 색상 히스토그램에서 순수 <strong>흰색·검정 제외</strong> 후, 가장 빈도 높은 색을 배경색으로 결정</p>
+        </div>
+        <div class="formula-box">C_dom = argmax_c H(c)</div>
+        <div class="card accent-blue">
+          <div class="card-title">② 색상 거리 기반 이진화</div>
+          <p>픽셀과 배경색 간 <span class="hl">색상 거리</span> 계산 → 임계값 초과 시 텍스트(검정), 이하 시 배경(흰색)</p>
+        </div>
+        <div class="formula-box">거리 초과 → 검정 (텍스트, 0)<br>거리 이하 → 흰색 (배경, 255)</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div class="card accent-green">
+          <div class="card-title">③ Tesseract 문자 인식</div>
+          <p>생성된 이진 블록 이미지를 Tesseract LSTM에 전달 → <span class="hl-g">문자 인식만 수행</span> (레이아웃 분석·이진화 제외)</p>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:stretch;">
+          <div class="pipe-step" style="border-color:#4db8ff44;background:#4db8ff0d;">
+            <div class="step-num" style="color:#4db8ff;">STEP 1</div>
+            <div class="step-title" style="font-size:13px;">BFS 블록 분리</div>
+          </div>
+          <div style="text-align:center;color:#0066cc66;font-size:20px;">↓</div>
+          <div class="pipe-step" style="border-color:#4db8ff44;background:#4db8ff0d;">
+            <div class="step-num" style="color:#4db8ff;">STEP 2</div>
+            <div class="step-title" style="font-size:13px;">C_dom 배경색 이진화</div>
+          </div>
+          <div style="text-align:center;color:#0066cc66;font-size:20px;">↓</div>
+          <div class="pipe-step" style="border-color:#4caf5044;background:#4caf500d;">
+            <div class="step-num" style="color:#4caf50;">STEP 3</div>
+            <div class="step-title" style="font-size:13px;">Tesseract 문자 인식만</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">✅ 특징</div>
+          <ul class="bullet-list" style="font-size:13px;margin-top:6px;">
+            <li>블록별 <span class="hl">고유 배경색</span>에 최적화된 이진화</li>
+            <li>처리 시간 <span class="hl-g">10분 33초</span> — Original과 유사</li>
+            <li>성능·속도의 <span class="hl">실용적 균형</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ───── SLIDE 8: 4전략 방법 ───── -->
+  <div class="slide slide-section">
+    <div class="section-num">02 — 제안 방법 / 4전략</div>
+    <h3>4전략 <span class="accent">다중 이진화</span> 방법</h3>
+    <p style="font-size:14px;color:#8ab4d4;margin-bottom:18px;">BFS로 분리된 각 블록에 4가지 이진화를 모두 적용 → <span class="hl">한글 인식 수 최다 결과</span> 선택</p>
+    <div class="card-grid cols-2" style="gap:14px;margin-bottom:16px;">
+      <div class="card accent-blue">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <span class="badge badge-blue">1</span>
+          <div class="card-title" style="margin:0;">배경색 이진화</div>
+        </div>
+        <p style="font-size:13px;">C_dom 기반 색상 거리 이진화 (Block Background와 동일한 방식)</p>
+        <div class="formula-box" style="margin-top:8px;font-size:12px;">C_dom = argmax_c H(c)</div>
+      </div>
+      <div class="card accent-blue">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <span class="badge badge-blue">2</span>
+          <div class="card-title" style="margin:0;">흰 텍스트 추출</div>
+        </div>
+        <p style="font-size:13px;">밝기·채도 기준으로 흰색 텍스트 픽셀 판별</p>
+        <div class="formula-box" style="margin-top:8px;font-size:12px;">T(p) = {0&nbsp;&nbsp; if B(p)&gt;160 and S(p)&lt;60<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{255 otherwise</div>
+      </div>
+      <div class="card accent-blue">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <span class="badge badge-blue">3</span>
+          <div class="card-title" style="margin:0;">Otsu 전역 이진화</div>
+        </div>
+        <p style="font-size:13px;">클래스 간 분산을 최대화하는 임계값 t* 결정</p>
+        <div class="formula-box" style="margin-top:8px;font-size:12px;">t* = argmax w₀·w₁·[μ₀-μ₁]²</div>
+      </div>
+      <div class="card accent-blue">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <span class="badge badge-blue">4</span>
+          <div class="card-title" style="margin:0;">다크모드 밝기 임계값</div>
+        </div>
+        <p style="font-size:13px;">밝기 상위 20% 픽셀을 텍스트로 추출 (어두운 배경 대응)</p>
+        <div class="formula-box" style="margin-top:8px;font-size:12px;">t_dark = max(P₈₀(B), 150)</div>
+      </div>
+    </div>
+    <div class="summary-box">
+      <div class="label">선택 기준 &amp; 트레이드오프</div>
+      <p>4가지 결과 중 <span class="hl">한글 문자 수 최다 결과</span>를 최종 출력으로 선택 → 다양한 배경색·텍스트 조합 완전 대응<br>
+      <span class="hl-r" style="font-size:13px;">⚠ 단점: 블록당 Tesseract 4회 호출 → 처리 시간 약 2.4배 증가 (29분 5초)</span></p>
+    </div>
+  </div>
+
+  <!-- ───── SLIDE 8: 비교 방법 ───── -->
+  <div class="slide slide-section">
+    <div class="section-num">03 — 실험 및 결과</div>
+    <h3>비교 <span class="accent">방법 정의</span></h3>
+    <div class="card-grid cols-2" style="gap:16px;">
+      <div class="card" style="border-color:#ef535044;background:#ef53500a;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <div class="card-title">Original (기존 방법)</div>
+          <span class="badge badge-red">BASE</span>
+        </div>
+        <p>전처리 없이 시간표 전체 이미지를 Tesseract에 직접 입력. Tesseract가 Otsu 이진화 → Connected Component → LSTM 인식을 모두 수행.</p>
+        <p style="margin-top:8px;color:#ef5350;font-size:13px;">⚠ 배경색 간섭으로 인식 성능 저하</p>
+      </div>
+      <div class="card" style="border-color:#ffa72644;background:#ffa7260a;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <div class="card-title">Bicubic (BFS + 업스케일)</div>
+          <span class="badge" style="background:#ffa72622;color:#ffa726;border:1px solid #ffa72644;">PREV</span>
+        </div>
+        <p>BFS로 블록 분리 후, Bicubic 보간법으로 <span class="hl-a">2배 업스케일</span>하여 Tesseract에 입력. 이진화 없이 컬러 이미지 그대로 전달.</p>
+        <p style="margin-top:8px;color:#ffa726;font-size:13px;">⚠ Tesseract 내부 이진화 배경색 간섭 잔존</p>
+      </div>
+      <div class="card" style="border-color:#4db8ff44;background:#4db8ff0a;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <div class="card-title">Block Background (제안 1)</div>
+          <span class="badge badge-blue">PROPOSED</span>
+        </div>
+        <p>BFS 블록 분리 + 배경색 감지 이진화. 각 블록의 고유 배경색을 제거한 이진 이미지를 Tesseract에 전달하여 <span class="hl">문자 인식만 수행</span>.</p>
+        <p style="margin-top:8px;color:#4db8ff;font-size:13px;">✓ 성능과 처리 속도의 균형</p>
+      </div>
+      <div class="card" style="border-color:#4caf5044;background:#4caf500a;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <div class="card-title">4전략 (제안 2)</div>
+          <span class="badge badge-green">BEST</span>
+        </div>
+        <p>블록당 4가지 이진화 방법을 모두 적용 후 <span class="hl-g">한글 인식 수 최다 결과 선택</span>. 다양한 시간표 스타일 대응.</p>
+        <p style="margin-top:8px;color:#4caf50;font-size:13px;">✓ 최고 인식률 (단, 처리 시간 증가)</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ───── SLIDE 9: 실험 설정 ───── -->
+  <div class="slide slide-section">
+    <div class="section-num">03 — 실험 및 결과</div>
+    <h3>실험 <span class="accent">설정</span></h3>
+    <div class="two-col" style="gap:28px;">
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div class="card accent-blue">
+          <div class="card-icon">📊</div>
+          <div class="card-title">데이터셋</div>
+          <p>직접 수집한 <span class="hl">229개의 대학교 수업 시간표 이미지</span></p>
+          <p style="margin-top:6px;font-size:13px;color:#4db8ff;">총 2,029개 과목 블록 포함</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🎯</div>
+          <div class="card-title">평가 기준</div>
+          <ul class="bullet-list">
+            <li>총 검출 항목 (과목 블록 수)</li>
+            <li>일치율 (4전략 결과 대비 %)</li>
+            <li>전체 OCR 처리 시간 (229개 합산)</li>
+          </ul>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;">
+        <img src="timetable.png" alt="수업 시간표 샘플 이미지"
+          style="max-height:340px;max-width:100%;border-radius:12px;box-shadow:0 4px 16px #00000033;object-fit:contain;">
+        <p style="font-size:13px;color:#8ab4d4;text-align:center;">그림 1. 수업 시간표 이미지 (Fig. 1. timetable image)</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ───── SLIDE 10: 실험 결과 ───── -->
+  <div class="slide slide-section">
+    <div class="section-num">03 — 실험 및 결과</div>
+    <h3>실험 <span class="accent">결과</span></h3>
+    <table class="result-table" style="margin-bottom:20px;">
+      <thead>
+        <tr>
+          <th>방법</th>
+          <th>총 검출 항목</th>
+          <th>일치율</th>
+          <th>처리 시간</th>
+          <th>평가</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="best">
+          <td><span class="badge badge-green">4전략</span></td>
+          <td>2,029</td>
+          <td><strong>100%</strong></td>
+          <td>29분 5초</td>
+          <td>최고 정확도</td>
+        </tr>
+        <tr class="second">
+          <td><span class="badge badge-blue">Block Background</span></td>
+          <td>2,029</td>
+          <td>93.4%</td>
+          <td>10분 33초</td>
+          <td>균형 ✓</td>
+        </tr>
+        <tr>
+          <td><span class="badge" style="background:#ffa72622;color:#ffa726;border:1px solid #ffa72644;">Bicubic</span></td>
+          <td>2,009</td>
+          <td>77.7%</td>
+          <td>11분 13초</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><span class="badge badge-red">Original</span></td>
+          <td>1,978</td>
+          <td>69.0%</td>
+          <td>11분 54초</td>
+          <td>기준선</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="bar-chart">
+      <div class="bar-row">
+        <div class="bar-label">4전략</div>
+        <div class="bar-track"><div class="bar-fill" style="width:100%;background:linear-gradient(90deg,#4caf50,#2e7d32);">100%</div></div>
+        <div class="bar-value">2,029개</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">Block Background</div>
+        <div class="bar-track"><div class="bar-fill" style="width:93.4%;background:linear-gradient(90deg,#4db8ff,#0080ff);">93.4%</div></div>
+        <div class="bar-value">2,029개</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">Bicubic</div>
+        <div class="bar-track"><div class="bar-fill" style="width:77.7%;background:linear-gradient(90deg,#ffa726,#e65100);">77.7%</div></div>
+        <div class="bar-value">2,009개</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">Original</div>
+        <div class="bar-track"><div class="bar-fill" style="width:69%;background:linear-gradient(90deg,#ef5350,#b71c1c);">69.0%</div></div>
+        <div class="bar-value">1,978개</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ───── SLIDE 11: 분석 ───── -->
+  <div class="slide slide-section">
+    <div class="section-num">03 — 실험 및 결과</div>
+    <h3>결과 <span class="accent">분석</span></h3>
+    <div class="card-grid cols-2" style="gap:18px;">
+      <div class="card accent-green">
+        <div class="card-title">✅ 4전략 방법</div>
+        <ul class="bullet-list" style="margin-top:8px;">
+          <li>가장 높은 인식 성능 <span class="hl-g">(100%)</span></li>
+          <li>다양한 배경색·텍스트 조합 완벽 대응</li>
+          <li>단점: 처리 시간 <span class="hl-r">Original 대비 약 2.4배</span></li>
+          <li>블록당 Tesseract 4회 호출로 속도 저하</li>
+        </ul>
+      </div>
+      <div class="card accent-blue">
+        <div class="card-title">✅ Block Background 방법</div>
+        <ul class="bullet-list" style="margin-top:8px;">
+          <li>일치율 <span class="hl">93.4%</span> — 실용적 수준</li>
+          <li>처리 시간 <span class="hl-g">10분 33초</span> (Original과 유사)</li>
+          <li>성능과 속도의 균형면에서 <span class="hl">실용적</span></li>
+          <li>배경색 기반 단일 이진화만으로도 충분한 성능</li>
+        </ul>
+      </div>
+    </div>
+    <div class="summary-box" style="margin-top:20px;">
+      <div class="label">KEY INSIGHT</div>
+      <p>
+        OCR 엔진에 전처리를 일임하는 것보다, <span class="hl">입력 이미지의 특성에 맞는 전처리를 외부에서 수행</span>하는 것이 인식 성능 향상에 효과적임을 실험으로 입증.
+        블록 단위 전처리는 전체 이미지 처리 방식 대비 <span class="hl-g">최대 31%p 향상</span>된 일치율을 달성.
+      </p>
+    </div>
+  </div>
+
+  <!-- ───── SLIDE 12: 결론 ───── -->
+  <div class="slide slide-section">
+    <div class="section-num">04 — 결론</div>
+    <h3>결 <span class="accent">론</span></h3>
+    <div class="card-grid cols-2" style="gap:18px;margin-bottom:20px;">
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div class="card accent-blue">
+          <div class="card-title">🎯 연구 기여</div>
+          <ul class="bullet-list" style="margin-top:6px;font-size:13px;">
+            <li>BFS 기반 컬러 블록 분리로 배경색 간섭 제거</li>
+            <li>블록별 최적화된 이진화로 인식 성능 향상</li>
+            <li>한국어 컬러 시간표 OCR 특화 전처리 파이프라인 제안</li>
+          </ul>
+        </div>
+        <div class="card accent-green">
+          <div class="card-title">📈 핵심 성과</div>
+          <ul class="bullet-list" style="margin-top:6px;font-size:13px;">
+            <li>기존 대비 <span class="hl-g">최대 31% 일치율 향상</span></li>
+            <li>Block Background: 처리 시간 부담 없이 실용적 성능</li>
+            <li>4전략: 다양한 시간표 스타일에 완전 대응</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card" style="background:#0a1520;border-color:#4db8ff33;display:flex;flex-direction:column;justify-content:center;gap:14px;">
+        <div style="color:#4db8ff;font-size:12px;letter-spacing:2px;">CONCLUSION</div>
+        <p style="font-size:15px;color:#cdd9e5;line-height:1.8;">
+          컬러 시간표 환경에서 <span class="hl">블록 단위 전처리</span>가 전체 이미지를 직접 처리하는 방식보다 높은 인식 성능을 보임을 확인.
+          <br><br>
+          배경색 기반 단일 이진화만으로도 처리 시간 부담 없이 <span class="hl-g">유사한 수준의 성능</span>을 얻을 수 있음을 검증.
+        </p>
+      </div>
+    </div>
+    <div style="background:#4caf500d;border:1px solid #4caf5033;border-radius:10px;padding:16px 22px;font-size:14px;color:#cdd9e5;line-height:1.7;">
+      <strong style="color:#4caf50;">시사점:</strong> OCR 엔진에 전처리를 일임하는 것보다, 입력 이미지의 특성에 맞는 <strong>외부 전처리를 수행</strong>하는 것이 인식 성능 향상에 효과적임
+    </div>
+  </div>
+
+  <!-- ───── SLIDE 13: 참고문헌 ───── -->
+  <div class="slide slide-section">
+    <div class="section-num">REFERENCES</div>
+    <h3>참 고 <span class="accent">문 헌</span></h3>
+    <div style="display:flex;flex-direction:column;gap:16px;">
+      <div class="card" style="display:flex;gap:16px;align-items:flex-start;">
+        <span class="badge badge-blue" style="flex-shrink:0;margin-top:2px;">[1]</span>
+        <p>S. Mori, C. Y. Suen, and K. Yamamoto, <em>"Historical review of OCR research and development,"</em> <strong>Proc. IEEE</strong>, vol. 80, no. 7, pp. 1029–1058, Jul. 1992.</p>
+      </div>
+      <div class="card" style="display:flex;gap:16px;align-items:flex-start;">
+        <span class="badge badge-blue" style="flex-shrink:0;margin-top:2px;">[2]</span>
+        <p>N. Islam, Z. Islam, and N. Talukder, <em>"An efficient optical character recognition system for natural scene images,"</em> <strong>Proc. Int. Conf. Elect. Comput. Commun. Eng. (ECCE)</strong>, pp. 1–4, Feb. 2017.</p>
+      </div>
+      <div class="card" style="display:flex;gap:16px;align-items:flex-start;">
+        <span class="badge badge-blue" style="flex-shrink:0;margin-top:2px;">[3]</span>
+        <p>R. Smith, <em>"An overview of the Tesseract OCR engine,"</em> <strong>Proc. 9th Int. Conf. Doc. Anal. Recognit. (ICDAR)</strong>, vol. 2, pp. 629–633, Sep. 2007.</p>
+      </div>
+      <div class="card" style="display:flex;gap:16px;align-items:flex-start;">
+        <span class="badge badge-blue" style="flex-shrink:0;margin-top:2px;">[4]</span>
+        <p>J. Sauvola and M. Pietikäinen, <em>"Adaptive document image binarization,"</em> <strong>Pattern Recognit.</strong>, vol. 33, no. 2, pp. 225–236, Feb. 2000.</p>
+      </div>
+    </div>
+    <div style="margin-top:24px;text-align:center;font-size:13px;color:#8ab4d4;border-top:1px solid #ffffff10;padding-top:16px;">
+      본 논문은 2026년도 교육부 및 대구광역시의 재원으로 대구 RISE센터의 지원을 받아 수행된 지역혁신중심 대학지원체계(RISE)의 결과입니다.
+    </div>
+  </div>
+
+  <!-- ───── SLIDE 16: Q&A ───── -->
+  <div class="slide slide-title" style="background:linear-gradient(135deg,#f0f6ff 0%,#e8f2ff 50%,#f0f6ff 100%);">
+    <div style="font-size:80px;margin-bottom:24px;">💬</div>
+    <h1 style="font-size:48px;margin-bottom:16px;color:#0d1b2a;">감사합니다</h1>
+    <h2 style="font-size:22px;margin-bottom:40px;color:#3a5a7a;">Q &amp; A</h2>
+    <div class="author-box">
+      <div class="author-card">
+        <div class="name">정준형</div>
+        <div class="affil">계명대학교 컴퓨터공학과</div>
+        <div class="affil" style="color:#4db8ff;font-size:12px;">joon3701@gmail.com</div>
+      </div>
+    </div>
+    <div class="keywords">
+      <span class="kw">OCR</span>
+      <span class="kw">Tesseract</span>
+      <span class="kw">BFS</span>
+      <span class="kw">컬러 시간표</span>
+      <span class="kw">배경색 이진화</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- Progress bar -->
+<div class="progress-bar" id="progressBar"></div>
+
+<!-- Slide dots -->
+<div class="slide-dots" id="slideDots"></div>
+
+<!-- Navigation -->
+<div class="nav">
+  <button class="nav-btn" id="prevBtn" onclick="changeSlide(-1)">‹</button>
+  <span class="slide-counter" id="counter">1 / 16</span>
+  <button class="nav-btn" id="nextBtn" onclick="changeSlide(1)">›</button>
+</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+  let current = 0;
+
+  const dotsContainer = document.getElementById('slideDots');
+  slides.forEach((_, i) => {
+    const dot = document.createElement('div');
+    dot.className = 'dot' + (i === 0 ? ' active' : '');
+    dot.onclick = () => goTo(i);
+    dotsContainer.appendChild(dot);
+  });
+
+  function goTo(n) {
+    slides[current].classList.remove('active');
+    dotsContainer.children[current].classList.remove('active');
+    current = (n + total) % total;
+    slides[current].classList.add('active');
+    dotsContainer.children[current].classList.add('active');
+    document.getElementById('counter').textContent = (current + 1) + ' / ' + total;
+    document.getElementById('progressBar').style.width = ((current + 1) / total * 100) + '%';
+  }
+
+  function changeSlide(dir) { goTo(current + dir); }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') changeSlide(1);
+    if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp') changeSlide(-1);
+  });
+
+  // Init progress
+  document.getElementById('progressBar').style.width = (1 / total * 100) + '%';
+</script>
+</body>
+</html>
